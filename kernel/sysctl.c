@@ -189,6 +189,7 @@ static int max_extfrag_threshold = 1000;
 #endif
 
 #endif /* CONFIG_SYSCTL */
+extern int extra_free_kbytes;
 
 #if defined(CONFIG_BPF_SYSCALL) && defined(CONFIG_SYSCTL)
 static int bpf_stats_handler(struct ctl_table *table, int write,
@@ -2947,6 +2948,13 @@ static struct ctl_table vm_table[] = {
 		.mode		= 0644,
 		.proc_handler	= min_free_kbytes_sysctl_handler,
 		.extra1		= SYSCTL_ZERO,
+	},
+	{	.procname	= "extra_free_kbytes",
+		.data		= &extra_free_kbytes,
+		.maxlen         = sizeof(extra_free_kbytes),
+		.mode           = 0644,
+		.proc_handler   = min_free_kbytes_sysctl_handler,
+		.extra1		= SYSCTL_ZERO
 	},
 	{
 		.procname	= "watermark_boost_factor",
