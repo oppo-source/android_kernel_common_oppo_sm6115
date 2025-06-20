@@ -1581,7 +1581,7 @@ struct xhci_td {
 };
 
 /* xHCI command default timeout value */
-#define XHCI_CMD_DEFAULT_TIMEOUT	(5 * HZ)
+#define XHCI_CMD_DEFAULT_TIMEOUT	(1 * HZ)
 
 /* command descriptor */
 struct xhci_cd {
@@ -1689,7 +1689,7 @@ struct urb_priv {
 /* Poll every 60 seconds */
 #define	POLL_TIMEOUT	60
 /* Stop endpoint command timeout (secs) for URB cancellation watchdog timer */
-#define XHCI_STOP_EP_CMD_TIMEOUT	5
+#define XHCI_STOP_EP_CMD_TIMEOUT	1
 /* XXX: Make these module parameters */
 
 struct s3_save {
@@ -2108,6 +2108,8 @@ void xhci_free_container_ctx(struct xhci_hcd *xhci,
 /* xHCI host controller glue */
 typedef void (*xhci_get_quirks_t)(struct device *, struct xhci_hcd *);
 int xhci_handshake(void __iomem *ptr, u32 mask, u32 done, u64 timeout_us);
+int xhci_handshake_check_state(struct xhci_hcd *xhci, void __iomem *ptr,
+		u32 mask, u32 done, int usec, unsigned int exit_state);
 void xhci_quiesce(struct xhci_hcd *xhci);
 int xhci_halt(struct xhci_hcd *xhci);
 int xhci_start(struct xhci_hcd *xhci);

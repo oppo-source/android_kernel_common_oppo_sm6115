@@ -84,6 +84,8 @@
 #include "page_reporting.h"
 
 EXPORT_TRACEPOINT_SYMBOL_GPL(mm_page_alloc);
+/*add for extra_free_kbytes ***must at last*/
+#include <linux/of.h>
 
 /* Free Page Internal flags: for internal, non-pcp variants of free_pages(). */
 typedef int __bitwise fpi_t;
@@ -435,6 +437,12 @@ int min_free_kbytes = 1024;
 int user_min_free_kbytes = -1;
 int watermark_boost_factor __read_mostly = 15000;
 int watermark_scale_factor = 10;
+/*
+ * Extra memory for the system to try freeing. Used to temporarily
+ * free memory, to make space for new workloads. Anyone can allocate
+ * down to the min watermarks controlled by min_free_kbytes above.
+ */
+int extra_free_kbytes = 0;
 
 static unsigned long nr_kernel_pages __initdata;
 static unsigned long nr_all_pages __initdata;
@@ -8784,13 +8792,38 @@ static void setup_per_zone_lowmem_reserve(void)
 	calculate_totalreserve_pages();
 }
 
+/*add for extra_free_kbytes */
+static inline int support_extra_free_kbytes(void)
+{
+  	struct device_node *node;
+  	int ret = 0;
+
+  	node = of_find_compatible_node(NULL, NULL, "oplus,extra_free_kbytes");
+  	if (node == NULL) {
+		pr_err("Can't find oplus,extra_free_kbytes node\n");
+  		goto out;
+  	}
+  	ret = of_property_read_bool(node,"extra_free_kbytes");
+  	pr_err("extra_free_kbytes is %d\n", ret);
+
+  out:
+  	return ret;
+}
+
 static void __setup_per_zone_wmarks(void)
 {
 	unsigned long pages_min = min_free_kbytes >> (PAGE_SHIFT - 10);
+	unsigned long pages_low = extra_free_kbytes >> (PAGE_SHIFT - 10);
 	unsigned long lowmem_pages = 0;
 	struct zone *zone;
 	unsigned long flags;
+	static int low_mem_optimize = -1;
+	unsigned long vm_total_pages=nr_free_zone_pages(gfp_zone(GFP_HIGHUSER_MOVABLE));
 
+	if (low_mem_optimize < 0) {
+		low_mem_optimize = support_extra_free_kbytes();
+		pr_err("low_mem_optimize = %d\n", low_mem_optimize);
+	}
 	/* Calculate total number of !ZONE_HIGHMEM pages */
 	for_each_zone(zone) {
 		if (!is_highmem(zone))
@@ -8798,11 +8831,15 @@ static void __setup_per_zone_wmarks(void)
 	}
 
 	for_each_zone(zone) {
-		u64 tmp;
+		u64 tmp, low;
 
 		spin_lock_irqsave(&zone->lock, flags);
 		tmp = (u64)pages_min * zone_managed_pages(zone);
 		do_div(tmp, lowmem_pages);
+		if (low_mem_optimize) {
+			low = (u64)pages_low * zone_managed_pages(zone);
+			do_div(low, vm_total_pages);
+		}
 		if (is_highmem(zone)) {
 			/*
 			 * __GFP_HIGH and PF_MEMALLOC allocations usually don't
@@ -8836,9 +8873,13 @@ static void __setup_per_zone_wmarks(void)
 				      watermark_scale_factor, 10000));
 
 		zone->watermark_boost = 0;
-		zone->_watermark[WMARK_LOW]  = min_wmark_pages(zone) + tmp;
-		zone->_watermark[WMARK_HIGH] = min_wmark_pages(zone) + tmp * 2;
-
+		if (low_mem_optimize) {
+			zone->_watermark[WMARK_LOW]  = min_wmark_pages(zone) + low + tmp;
+			zone->_watermark[WMARK_HIGH] = min_wmark_pages(zone) + low + tmp * 2;
+		} else {
+			zone->_watermark[WMARK_LOW]  = min_wmark_pages(zone) + tmp;
+			zone->_watermark[WMARK_HIGH] = min_wmark_pages(zone) + tmp * 2;
+		}
 		spin_unlock_irqrestore(&zone->lock, flags);
 	}
 
