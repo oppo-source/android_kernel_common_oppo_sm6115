@@ -873,9 +873,18 @@ static blk_status_t sd_setup_unmap_cmnd(struct scsi_cmnd *cmd)
 	struct scsi_device *sdp = cmd->device;
 	struct request *rq = scsi_cmd_to_rq(cmd);
 	struct scsi_disk *sdkp = scsi_disk(rq->rq_disk);
+#ifdef CONFIG_SCSI_BATCH_UNMAP
+	struct bio *bio;
+	unsigned short segments = blk_rq_nr_discard_segments(rq);
+	unsigned int data_len = 8 + 16 * segments;
+	unsigned int descriptor_offset = 8;
+	u64 lba;
+	u32 nr_blocks;
+#else
 	u64 lba = sectors_to_logical(sdp, blk_rq_pos(rq));
 	u32 nr_blocks = sectors_to_logical(sdp, blk_rq_sectors(rq));
 	unsigned int data_len = 24;
+#endif
 	char *buf;
 
 	rq->special_vec.bv_page = mempool_alloc(sd_page_pool, GFP_ATOMIC);
@@ -888,14 +897,45 @@ static blk_status_t sd_setup_unmap_cmnd(struct scsi_cmnd *cmd)
 
 	cmd->cmd_len = 10;
 	cmd->cmnd[0] = UNMAP;
+	buf = bvec_virt(&rq->special_vec);
+#ifdef CONFIG_SCSI_BATCH_UNMAP
+	cmd->cmnd[7] = data_len>>8;
+	cmd->cmnd[8] = data_len & 0xff;
+
+	put_unaligned_be16(6 + 16 * segments, &buf[0]);
+	put_unaligned_be16(16 * segments, &buf[2]);
+	if (segments > 1) {
+		/* only device support fastdiscard can execute multi-UNMAP descriptor correctly */
+		__rq_for_each_bio(bio, rq) {
+			lba = sectors_to_logical(sdp, bio->bi_iter.bi_sector);
+			nr_blocks = sectors_to_logical(sdp, bio_sectors(bio));
+
+			put_unaligned_be64(lba, &buf[descriptor_offset]);
+			put_unaligned_be32(nr_blocks, &buf[descriptor_offset + 8]);
+			descriptor_offset += 16;
+		}
+	} else {
+		lba = sectors_to_logical(sdp, blk_rq_pos(rq));
+		nr_blocks = sectors_to_logical(sdp, blk_rq_sectors(rq));
+
+		put_unaligned_be64(lba, &buf[descriptor_offset]);
+		put_unaligned_be32(nr_blocks, &buf[descriptor_offset + 8]);
+	}
+	if (sdp->android_kabi_reserved1 == 0) {
+		/* disable fastdiscard, it need to set max discard segments to 1 */
+		if (queue_max_discard_segments(rq->q) > 1)
+			blk_queue_max_discard_segments(rq->q, 1);
+	} else if (sdp->android_kabi_reserved1 == 1 && queue_max_discard_segments(rq->q) == 1) {
+		blk_queue_max_discard_segments(rq->q, sdp->android_kabi_reserved2);
+	}
+#else
 	cmd->cmnd[8] = 24;
 
-	buf = bvec_virt(&rq->special_vec);
 	put_unaligned_be16(6 + 16, &buf[0]);
 	put_unaligned_be16(16, &buf[2]);
 	put_unaligned_be64(lba, &buf[8]);
 	put_unaligned_be32(nr_blocks, &buf[16]);
-
+#endif
 	cmd->allowed = sdkp->max_retries;
 	cmd->transfersize = data_len;
 	rq->timeout = SD_TIMEOUT;
@@ -2935,8 +2975,16 @@ static void sd_read_block_limits(struct scsi_disk *sdkp)
 		lba_count = get_unaligned_be32(&buffer[20]);
 		desc_count = get_unaligned_be32(&buffer[24]);
 
-		if (lba_count && desc_count)
+		if (lba_count && desc_count) {
 			sdkp->max_unmap_blocks = lba_count;
+#ifdef CONFIG_SCSI_BATCH_UNMAP
+			/* disable fastdiscard default */
+			sdkp->device->android_kabi_reserved1 = 0;
+			sdkp->device->android_kabi_reserved2 = 1;
+			if (desc_count > 1)
+				sdkp->device->android_kabi_reserved2 = desc_count;
+#endif
+		}
 
 		sdkp->unmap_granularity = get_unaligned_be32(&buffer[28]);
 

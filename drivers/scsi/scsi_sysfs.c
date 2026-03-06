@@ -660,7 +660,7 @@ static int scsi_sdev_check_buf_bit(const char *buf)
 			return 1;
 		else if (buf[0] == '0')
 			return 0;
-		else 
+		else
 			return -EINVAL;
 	} else
 		return -EINVAL;
@@ -884,7 +884,7 @@ store_queue_type_field(struct device *dev, struct device_attribute *attr,
 
 	if (!sdev->tagged_supported)
 		return -EINVAL;
-		
+
 	sdev_printk(KERN_INFO, sdev,
 		    "ignoring write to deprecated queue_type attribute");
 	return count;
@@ -892,6 +892,47 @@ store_queue_type_field(struct device *dev, struct device_attribute *attr,
 
 static DEVICE_ATTR(queue_type, S_IRUGO | S_IWUSR, show_queue_type_field,
 		   store_queue_type_field);
+
+#ifdef CONFIG_SCSI_BATCH_UNMAP
+static ssize_t
+sdev_show_fastdiscard_en(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct scsi_device *sdev;
+	sdev = to_scsi_device(dev);
+	return snprintf(buf, 20, "%u\n", sdev->android_kabi_reserved1);
+}
+
+static ssize_t
+sdev_store_fastdiscard_en(struct device *dev, struct device_attribute *attr,
+		   const char *buf, size_t count)
+{
+	struct scsi_device *sdev;
+	unsigned int fastdiscard_en;
+	int err;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EACCES;
+
+	sdev = to_scsi_device(dev);
+	err = kstrtouint(buf, 10, &fastdiscard_en);
+	if (err)
+		return err;
+	sdev->android_kabi_reserved1 = !!fastdiscard_en;
+
+	return count;
+}
+static DEVICE_ATTR(fastdiscard_en, S_IRUGO | S_IWUSR,
+	sdev_show_fastdiscard_en, sdev_store_fastdiscard_en);
+
+static ssize_t
+dev_max_discard_segments_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct scsi_device *sdev;
+	sdev = to_scsi_device(dev);
+	return snprintf(buf, 20, "%u\n", sdev->android_kabi_reserved2);
+}
+static DEVICE_ATTR_RO(dev_max_discard_segments);
+#endif
 
 #define sdev_vpd_pg_attr(_page)						\
 static ssize_t							\
@@ -1290,6 +1331,10 @@ static struct attribute *scsi_sdev_attrs[] = {
 	&dev_attr_modalias.attr,
 	&dev_attr_queue_depth.attr,
 	&dev_attr_queue_type.attr,
+#ifdef CONFIG_SCSI_BATCH_UNMAP
+	&dev_attr_fastdiscard_en.attr,
+	&dev_attr_dev_max_discard_segments.attr,
+#endif
 	&dev_attr_wwid.attr,
 	&dev_attr_blacklist.attr,
 #ifdef CONFIG_SCSI_DH
