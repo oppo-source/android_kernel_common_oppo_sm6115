@@ -179,7 +179,7 @@ DECLARE_EVENT_CLASS(block_rq,
 	TP_fast_assign(
 		__entry->dev	   = rq->rq_disk ? disk_devt(rq->rq_disk) : 0;
 		__entry->sector    = blk_rq_trace_sector(rq);
-		__entry->nr_sector = blk_rq_trace_nr_sectors(rq);
+		__entry->nr_sector = blk_rq_trace_nr_sectors(rq) | (rq->ioprio <<16);
 		__entry->bytes     = blk_rq_bytes(rq);
 		__entry->ioprio	   = rq->ioprio;
 
